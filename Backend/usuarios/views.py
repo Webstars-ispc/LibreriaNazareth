@@ -4,6 +4,10 @@ from .serializers import RegisterSerializer, UserSerializer, EmailTokenObtainPai
 from .permissions import IsAdminUser
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
+import logging
+
+logger = logging.getLogger('seguridad')
+
 #CRUD Usuario
 class RegisterView(generics.CreateAPIView):
     permission_classes = (permissions.AllowAny,)
@@ -52,5 +56,16 @@ class AdminUserDetailView(generics.RetrieveUpdateDestroyAPIView):
     def perform_destroy(self, instance):
         # Evita que un administrador se elimine a sí mismo
         if instance == self.request.user:
+            logger.info(
+                'Intento de autoeliminacion bloqueado',
+                extra={
+                    'usuario': self.request.user.username,
+                    'accion': 'DELETE',
+                    'recurso': self.request.path,
+                    'resultado': 'bloqueado',
+                    'ip': self.request.META.get('REMOTE_ADDR', '-'),
+                    'mensaje': 'Un administrador intento eliminarse a si mismo',
+                },
+            )
             raise serializers.ValidationError("No podés eliminar tu propio usuario.")
         instance.delete()

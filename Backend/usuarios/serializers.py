@@ -2,6 +2,25 @@ from rest_framework import serializers
 from django.contrib.auth.models import User, Group
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
+import logging
+
+logger = logging.getLogger('seguridad')
+
+
+def _log_login_fallido(request, email, motivo):
+    ip = request.META.get('REMOTE_ADDR', '-') if request else '-'
+    logger.info(
+        'Login fallido',
+        extra={
+            'usuario': email or 'desconocido',
+            'accion': 'login',
+            'recurso': '/api/auth/login/',
+            'resultado': 'rechazado',
+            'ip': ip,
+            'mensaje': motivo,
+        },
+    )
+
 
 class RegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, min_length=6)
@@ -73,13 +92,16 @@ class EmailTokenObtainPairSerializer(TokenObtainPairSerializer):
         try:
             user = User.objects.get(email=email)
         except User.DoesNotExist:
+            _log_login_fallido(self.context.get('request'), email, 'email inexistente')
             raise serializers.ValidationError('Credenciales inválidas.')
 
         # Verificamos la contraseña
         if not user.check_password(password):
+            _log_login_fallido(self.context.get('request'), email, 'contrasena incorrecta')
             raise serializers.ValidationError('Credenciales inválidas.')
 
         if not user.is_active:
+            _log_login_fallido(self.context.get('request'), email, 'usuario inactivo')
             raise serializers.ValidationError('Usuario inactivo.')
 
         # Generamos los tokens
