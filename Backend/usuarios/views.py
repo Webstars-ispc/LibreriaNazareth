@@ -1,8 +1,10 @@
-from rest_framework import generics, permissions, serializers
+from rest_framework import generics, permissions, serializers, status
+from rest_framework.response import Response
 from django.contrib.auth.models import User
 from .serializers import RegisterSerializer, UserSerializer, EmailTokenObtainPairSerializer
 from .permissions import IsAdminUser
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
+from rest_framework_simplejwt.tokens import RefreshToken
 
 import logging
 
@@ -13,6 +15,26 @@ class RegisterView(generics.CreateAPIView):
     permission_classes = (permissions.AllowAny,)
     queryset = User.objects.all()
     serializer_class = RegisterSerializer
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user = serializer.save()
+
+        # Devolvemos los tokens para que la app inicie sesión automáticamente,
+        # más los datos del usuario (incluido nombre/apellido y rol).
+        refresh = RefreshToken.for_user(user)
+        group = user.groups.first()
+        data = {
+            'refresh': str(refresh),
+            'access': str(refresh.access_token),
+            'username': user.username,
+            'email': user.email,
+            'nombre': user.first_name,
+            'apellido': user.last_name,
+            'role': group.name if group else None,
+        }
+        return Response(data, status=status.HTTP_201_CREATED)
 
 class LoginView(TokenObtainPairView):
     permission_classes = (permissions.AllowAny,)

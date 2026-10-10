@@ -23,7 +23,10 @@ def _log_login_fallido(request, email, motivo):
 
 
 class RegisterSerializer(serializers.ModelSerializer):
-    password = serializers.CharField(write_only=True, min_length=6)
+    password = serializers.CharField(write_only=True, min_length=6, required=False)
+    # nombre/apellido se guardan en first_name/last_name del User de Django
+    nombre = serializers.CharField(source='first_name', required=False, allow_blank=True)
+    apellido = serializers.CharField(source='last_name', required=False, allow_blank=True)
     role = serializers.ChoiceField(
         choices=['Administrador', 'Empleado'],
         write_only=True,
@@ -32,7 +35,21 @@ class RegisterSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ('username', 'email', 'password', 'role')
+        fields = ('username', 'nombre', 'apellido', 'email', 'password', 'role')
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        group = instance.groups.first()
+        data['role'] = group.name if group else None
+        return data
+
+    def validate(self, attrs):
+        # La contraseña es obligatoria al crear, pero opcional al editar.
+        if self.instance is None and not attrs.get('password'):
+            raise serializers.ValidationError(
+                {'password': 'La contraseña es obligatoria.'}
+            )
+        return attrs
 
     def create(self, validated_data):
         role = validated_data.pop('role', 'Empleado')
@@ -61,14 +78,16 @@ class RegisterSerializer(serializers.ModelSerializer):
 
         instance.save()
         return instance
-    
-    
+
+
 class UserSerializer(serializers.ModelSerializer):
     role = serializers.SerializerMethodField()
+    nombre = serializers.CharField(source='first_name', required=False)
+    apellido = serializers.CharField(source='last_name', required=False)
 
     class Meta:
         model = User
-        fields = ('id', 'username', 'email', 'role')
+        fields = ('id', 'username', 'nombre', 'apellido', 'email', 'role')
 
     def get_role(self, obj):
         # Devuelve el primer grupo del usuario (o None si no tiene)
