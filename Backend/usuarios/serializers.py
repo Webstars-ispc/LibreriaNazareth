@@ -1,10 +1,28 @@
 from rest_framework import serializers
 from django.contrib.auth.models import User, Group
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 import logging
 
 logger = logging.getLogger('seguridad')
+
+
+def _log_auditoria(request, accion, recurso, resultado, email, motivo=''):
+    """Registro único de auditoría de seguridad."""
+    ip = request.META.get('REMOTE_ADDR', '-') if request else '-'
+    logger.info(
+        'Auditoría de seguridad',
+        extra={
+            'usuario': email or 'desconocido',
+            'accion': accion,
+            'recurso': recurso,
+            'resultado': resultado,
+            'ip': ip,
+            'mensaje': motivo or '-',
+        },
+    )
 
 
 def _log_login_fallido(request, email, motivo):
@@ -23,7 +41,7 @@ def _log_login_fallido(request, email, motivo):
 
 
 class RegisterSerializer(serializers.ModelSerializer):
-    password = serializers.CharField(write_only=True, min_length=6, required=False)
+    password = serializers.CharField(write_only=True, min_length=8, required=False)
     # nombre/apellido se guardan en first_name/last_name del User de Django
     nombre = serializers.CharField(source='first_name', required=False, allow_blank=True)
     apellido = serializers.CharField(source='last_name', required=False, allow_blank=True)
@@ -45,10 +63,22 @@ class RegisterSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         # La contraseña es obligatoria al crear, pero opcional al editar.
-        if self.instance is None and not attrs.get('password'):
+        password = attrs.get('password')
+
+        if self.instance is None and not password:
             raise serializers.ValidationError(
                 {'password': 'La contraseña es obligatoria.'}
             )
+
+        # Política de contraseña segura (letras + números + especial, ≥ 8).
+        if password:
+            try:
+                validate_password(password, self.instance)
+            except DjangoValidationError as exc:
+                raise serializers.ValidationError(
+                    {'password': list(exc.messages)}
+                )
+
         return attrs
 
     def create(self, validated_data):
@@ -59,6 +89,15 @@ class RegisterSerializer(serializers.ModelSerializer):
             user.save()
         group = Group.objects.get(name=role)
         user.groups.add(group)
+
+        _log_auditoria(
+            self.context.get('request'),
+            'registro_usuario',
+            '/api/auth/register/',
+            'aceptado',
+            user.email,
+            'Alta de usuario con rol ' + role,
+        )
         return user
 
     def update(self, instance, validated_data):
@@ -77,6 +116,16 @@ class RegisterSerializer(serializers.ModelSerializer):
             instance.groups.add(group)
 
         instance.save()
+
+        _log_auditoria(
+            self.context.get('request'),
+            'edicion_usuario',
+            '/api/auth/usuarios/' + str(instance.pk) + '/',
+            'aceptado',
+            instance.email,
+            'Edición de usuario'
+            + (' con cambio de contraseña' if password else ''),
+        )
         return instance
 
 
@@ -129,4 +178,13 @@ class EmailTokenObtainPairSerializer(TokenObtainPairSerializer):
             'refresh': str(refresh),
             'access': str(refresh.access_token),
         }
+
+        _log_auditoria(
+            self.context.get('request'),
+            'login',
+            '/api/auth/login/',
+            'aceptado',
+            email,
+            'Autenticación correcta',
+        )
         return data
